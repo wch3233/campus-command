@@ -14,7 +14,7 @@ fi
 # Install Python deps
 if ! python3 -c "import flask" &>/dev/null; then
   echo "Installing Python dependencies..."
-  pip3 install -r requirements.txt
+  pip3 install -r requirements.txt --break-system-packages 2>/dev/null || pip3 install -r requirements.txt
 fi
 
 # Install npm deps
