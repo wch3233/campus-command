@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "electron": "npm run dist && open 'dist/mac-arm64/Campus Command.app'",
+    "electron": "unset ELECTRON_RUN_AS_NODE && electron .",
     "dist": "npm run build && electron-builder",
     "preview": "vite preview"
   },

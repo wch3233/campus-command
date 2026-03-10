@@ -23,6 +23,9 @@ if [ ! -d "node_modules" ]; then
   npm install
 fi
 
+# Clear any Electron env conflicts
+unset ELECTRON_RUN_AS_NODE
+
 # Build the app
 echo "Building Campus Command..."
 npm run build
