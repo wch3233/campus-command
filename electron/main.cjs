@@ -10,9 +10,25 @@ let mainWindow = null;
 
 function startPythonServer() {
   const serverPath = path.join(__dirname, "../server.py");
-  pythonProcess = spawn("python3", [serverPath], {
-    cwd: path.join(__dirname, ".."),
-    env: { ...process.env },
+  const projectDir = path.join(__dirname, "..");
+
+  // Load .env file so API key is available to Python
+  const fs = require("fs");
+  const envPath = path.join(projectDir, ".env");
+  const envVars = { ...process.env };
+  if (fs.existsSync(envPath)) {
+    fs.readFileSync(envPath, "utf-8").split("\n").forEach((line) => {
+      const match = line.match(/^([^#][^=]*)=(.*)$/);
+      if (match) envVars[match[1].trim()] = match[2].trim();
+    });
+  }
+
+  // Use full path to python3 in case PATH is limited in Electron context
+  const python = envVars.PYTHON_PATH || "/opt/homebrew/bin/python3";
+
+  pythonProcess = spawn(python, [serverPath], {
+    cwd: projectDir,
+    env: envVars,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
