@@ -37,6 +37,8 @@ Topics you cover:
 
 Lab reports: Help structure hypothesis, methods, results, and conclusion.
 Texas TEKS standards are your curriculum guide.
+
+IMPORTANT: Use LaTeX notation for all equations and formulas: $...$ for inline math and $$...$$ for block equations.
 """.strip()
 
 
