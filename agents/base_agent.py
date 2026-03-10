@@ -33,7 +33,10 @@ class BaseAgent(ABC):
         """
         self.name = name
         self.tools = tools or []
-        self._ensure_log_dir()
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        if not os.path.exists(LOG_PATH):
+            with open(LOG_PATH, 'w') as f:
+                import json; json.dump([], f)
 
     # ── Abstract interface ────────────────────────────────────────────────────
 
