@@ -71,9 +71,23 @@ class HistoryAgent(BaseAgent):
         try:
             extra = ""
             if do_search:
-                results = search(f"AP US History {query}")
+                # Detect AP subject from injected context, fall back to broad AP history search
+                ap_hint = ""
+                if "AP Human Geography" in context:
+                    ap_hint = "AP Human Geography"
+                elif "AP World History" in context:
+                    ap_hint = "AP World History Modern"
+                elif "AP US History" in context or "APUSH" in context:
+                    ap_hint = "AP US History APUSH"
+                elif "AP Government" in context:
+                    ap_hint = "AP US Government Politics"
+                else:
+                    ap_hint = "AP History Social Studies"
+                results = search(f"{ap_hint} {query} College Board site:apcentral.collegeboard.org")
+                if not results:
+                    results = search(f"{ap_hint} {query} College Board exam curriculum")
                 if results:
-                    extra = f"\n\nResearch resources:\n{format_results(results)}"
+                    extra = f"\n\nCollege Board AP Resources:\n{format_results(results)}"
 
             user_message = query
             if context:

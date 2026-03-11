@@ -70,7 +70,21 @@ class MathAgent(BaseAgent):
         try:
             extra = ""
             if do_search:
-                results = search(f"high school math {query}")
+                ap_hint = ""
+                if "AP Calculus AB" in context:
+                    ap_hint = "AP Calculus AB"
+                elif "AP Calculus BC" in context:
+                    ap_hint = "AP Calculus BC"
+                elif "AP Statistics" in context:
+                    ap_hint = "AP Statistics"
+                elif "AP" in context and "math" in query.lower():
+                    ap_hint = "AP Calculus"
+                if ap_hint:
+                    results = search(f"{ap_hint} {query} College Board FRQ site:apcentral.collegeboard.org")
+                    if not results:
+                        results = search(f"{ap_hint} {query} College Board exam prep")
+                else:
+                    results = search(f"high school math {query} Texas TEKS Algebra")
                 if results:
                     extra = f"\n\nAdditional reference material:\n{format_results(results)}"
 

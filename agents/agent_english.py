@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseAgent
 from tools.claude_api import call_claude
+from tools.web_search import search, format_results
 from config import STUDENT_PROFILE
 
 
@@ -69,6 +70,7 @@ class EnglishAgent(BaseAgent):
         query = input_data.get("query", "").strip()
         task = input_data.get("task", "general")
         context = input_data.get("context", "")
+        do_search = input_data.get("search", False)
 
         if not query:
             return self._failure("No writing or question provided.", notes="Empty query.")
@@ -76,11 +78,24 @@ class EnglishAgent(BaseAgent):
         self.log(f"English query (task={task}): {query[:100]}")
 
         try:
+            extra = ""
+            if do_search:
+                if "AP Language" in context or "AP English" in context or "AP Lit" in context:
+                    ap_hint = "AP English Literature" if "AP Lit" in context else "AP English Language Composition"
+                    results = search(f"{ap_hint} {query} College Board rubric site:apcentral.collegeboard.org")
+                    if not results:
+                        results = search(f"{ap_hint} {query} College Board FRQ rhetorical analysis")
+                else:
+                    results = search(f"high school English writing {query} Texas TEKS")
+                if results:
+                    extra = f"\n\nCollege Board English Resources:\n{format_results(results)}"
+
             user_message = query
             if context:
                 user_message = f"Assignment prompt: {context}\n\nStudent's work or question:\n{query}"
             if task and task != "general":
                 user_message = f"Task type: {task}\n\n{user_message}"
+            user_message += extra
 
             response = call_claude(
                 system_prompt=SYSTEM_PROMPT,

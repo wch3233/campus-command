@@ -30,6 +30,24 @@ unset ELECTRON_RUN_AS_NODE
 echo "Building Campus Command..."
 npm run build
 
+# Show the network URL so you can share it with other devices on the same WiFi
+NETWORK_IP=$(python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || echo "unknown")
+echo ""
+echo "╔══════════════════════════════════════════════╗"
+echo "  Campus Command is starting..."
+echo "  Open on THIS Mac:  http://localhost:5001"
+if [ "$NETWORK_IP" != "unknown" ]; then
+echo "  Open on ANY device on this WiFi:"
+echo "  → http://$NETWORK_IP:5001"
+fi
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+
+# Show a macOS notification with the network address
+if [ "$NETWORK_IP" != "unknown" ]; then
+  osascript -e "display notification \"Browser URL: http://$NETWORK_IP:5001\" with title \"Campus Command\" subtitle \"Share this with your kid\""
+fi
+
 # Launch Electron
 echo "Launching Campus Command..."
 npm run electron

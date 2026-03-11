@@ -15,7 +15,8 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseAgent
-from tools.claude_api import call_claude
+from tools.claude_api import call_claude, call_claude_with_image
+from tools.web_search import search as web_search, format_results as format_search_results
 from config import STUDENT_PROFILE, MAX_RETRIES, MAX_ITERATIONS, MODEL_NAME
 
 # ── Routing prompt ─────────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ Given a student's query, classify it and return a JSON object with:
   "subject": "brief subject label",
   "query_type": "homework | essay | concept | practice | emotional | planning | ap_exam | flashcards | other",
   "needs_search": true or false,
+  "is_ap_class": true or false,
+  "ap_subject": "exact AP course name (e.g. AP Human Geography) or null",
   "rephrased_query": "a clearer version of the query for the agent",
   "confidence": 0-100
 }}
@@ -47,7 +50,43 @@ Routing rules:
 - Course selection, college, "what should I do" → guidance_counselor
 - Unclear queries → guidance_counselor
 
+Set "is_ap_class": true if the query is about a course listed in the student's "ap_classes" context fact,
+or if the query explicitly mentions an AP course. Set "ap_subject" to the specific AP course name.
+
+Set "needs_search": true when the query asks about:
+- AP exam format, rubrics, scoring, CED curriculum topics, exam dates, or practice prompts
+- Specific Rockwall ISD policies, teachers, events, or deadlines
+- Texas graduation requirements or TEKS standards (to get latest official info)
+- College prep timelines, SAT/ACT dates
+- Current events or anything that may have changed recently
+Otherwise set "needs_search": false.
+
 Return ONLY valid JSON. No explanation text.
+""".strip()
+
+# ── Vision prompt ───────────────────────────────────────────────────────────────
+VISION_PROMPT = f"""
+You are a brilliant, patient high school AI tutor with expertise in all subjects.
+
+{STUDENT_PROFILE}
+
+The student has sent you a photo of an assignment, problem, worksheet, or document.
+
+Your job:
+1. READ the image carefully — identify every question, equation, diagram, or text
+2. Work through each problem step by step, showing ALL work clearly
+3. Use LaTeX for math: inline $...$ or block $$...$$
+4. Use ```mermaid for diagrams when helpful
+5. Use ```plotly for graphs when helpful
+6. Keep explanations short and clear — avoid walls of text (student has ADD)
+7. End with a "💡 Key idea:" summary
+
+GRADES / SCORES — if you see a grade, test score, or report card:
+- Comment helpfully (encouragement, what to review, how to improve)
+- Do NOT store, track, or build a grade log — just respond naturally to what's shown
+- A bad grade is a coaching opportunity; a good grade deserves celebration
+
+If the image is unclear or hard to read, describe what you can see and ask for clarification.
 """.strip()
 
 # ── Synthesis prompt ────────────────────────────────────────────────────────────
@@ -123,6 +162,31 @@ class Orchestrator(BaseAgent):
             Structured response dict.
         """
         query = input_data.get("query", "").strip()
+        image_data = input_data.get("image")  # {"data": base64str, "type": "image/jpeg"}
+
+        # ── Image fast-path: skip agentic loop, call vision API directly ──────
+        if image_data and image_data.get("data"):
+            self.log("=== Image query — using vision fast-path ===")
+            user_message = query or "Please analyze this image and help me understand or solve the problem shown."
+            try:
+                response = call_claude_with_image(
+                    system_prompt=VISION_PROMPT,
+                    user_message=user_message,
+                    image_base64=image_data["data"],
+                    media_type=image_data.get("type", "image/jpeg"),
+                )
+                return self._success(
+                    output=response,
+                    confidence=90,
+                    notes="vision_response",
+                )
+            except Exception as e:
+                self.log(f"Vision API error: {e}")
+                return self._failure(
+                    output=f"I had trouble reading that image: {e}. Try a clearer photo or describe the problem in text.",
+                    notes=str(e),
+                )
+
         if not query:
             return self._failure("No query provided.", notes="Empty input.")
 
@@ -272,12 +336,28 @@ class Orchestrator(BaseAgent):
             "search": routing.get("needs_search", False),
         }
 
+        # Web search — school sources for school queries, College Board for AP queries
+        ap_subject = routing.get("ap_subject") or ""
+        if routing.get("needs_search"):
+            if routing.get("is_ap_class") and ap_subject:
+                ap_text = self._run_ap_search(ap_subject, routing.get("rephrased_query", query))
+                if ap_text:
+                    agent_input["context"] = (
+                        f"College Board AP Resources ({ap_subject}):\n{ap_text}\n\n{context}"
+                    ).strip()
+            school_text = self._run_school_search(routing.get("rephrased_query", query))
+            if school_text:
+                existing = agent_input.get("context", context)
+                agent_input["context"] = (
+                    f"{existing}\n\nLive web search (Rockwall ISD / Texas):\n{school_text}"
+                ).strip()
+
         steps.append({"agent": primary, "input": agent_input})
 
         if secondary and secondary != primary and secondary in self.agents:
             steps.append({"agent": secondary, "input": agent_input})
 
-        self.log(f"Plan: primary={primary}, secondary={secondary or 'none'}")
+        self.log(f"Plan: primary={primary}, secondary={secondary or 'none'}, search={routing.get('needs_search', False)}")
         return steps
 
     # ── Delegation ────────────────────────────────────────────────────────────
@@ -375,6 +455,54 @@ class Orchestrator(BaseAgent):
         except Exception as e:
             self.log(f"Synthesis error: {e}. Returning first result.")
             return successful[0]["output"]
+
+    # ── Web search ────────────────────────────────────────────────────────────
+
+    def _run_ap_search(self, ap_subject: str, query: str) -> str:
+        """
+        Search College Board AP Central for official AP curriculum and exam resources.
+        Falls back to a broader AP exam prep search if AP Central returns nothing.
+        """
+        try:
+            # Primary: AP Central (official College Board resource)
+            cb_query = f"{ap_subject} {query} site:apcentral.collegeboard.org"
+            results = web_search(cb_query, count=3)
+
+            # Secondary: broader College Board / AP prep search
+            if not results:
+                results = web_search(
+                    f"{ap_subject} exam curriculum {query} College Board CED", count=3
+                )
+
+            if results:
+                self.log(f"AP Central search: {len(results)} results for {ap_subject}")
+                return format_search_results(results)
+            return ""
+        except Exception as e:
+            self.log(f"AP search error: {e}")
+            return ""
+
+    def _run_school_search(self, query: str) -> str:
+        """
+        Search Rockwall ISD and Texas education sources for live info.
+        Falls back to a general query if school-specific search returns nothing.
+        """
+        try:
+            # First pass: target Rockwall ISD and TEA domains
+            school_query = f"{query} site:rockwallisd.com OR site:tea.texas.gov"
+            results = web_search(school_query, count=3)
+
+            # Second pass: broader Texas education search
+            if not results:
+                results = web_search(f"{query} Rockwall ISD Texas high school", count=3)
+
+            if results:
+                self.log(f"Web search returned {len(results)} results for: {query[:60]}")
+                return format_search_results(results)
+            return ""
+        except Exception as e:
+            self.log(f"Web search error: {e}")
+            return ""
 
     # ── Fallback ──────────────────────────────────────────────────────────────
 

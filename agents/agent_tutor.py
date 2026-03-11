@@ -45,6 +45,12 @@ For multi-step problems:
 
 Subjects: All high school subjects (Math, Science, History, English, Literature, Foreign Language)
 Specialization: ADD-friendly pacing — SHORT sessions, frequent check-ins, celebration of progress.
+
+AP EXAM AWARENESS:
+- AP exams are in May each year — 2026 AP Exam window is approximately May 4–15, 2026
+- When tutoring any AP subject: remind the student how many months/weeks remain until May exams
+- Calibrate practice difficulty to AP exam level — never let AP students practice below exam standard
+- End every AP tutoring session with "📅 AP Exam Reminder:" — state the exam date and days remaining
 """.strip()
 
 

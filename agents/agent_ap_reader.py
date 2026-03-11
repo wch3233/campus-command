@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.base_agent import BaseAgent
 from tools.claude_api import call_claude
+from tools.web_search import search, format_results
 from config import STUDENT_PROFILE
 
 
@@ -74,6 +75,7 @@ class APReaderAgent(BaseAgent):
         subject = input_data.get("subject", "AP")
         essay_type = input_data.get("type", "essay")
         context = input_data.get("context", "")
+        do_search = input_data.get("search", False)
 
         if not query:
             return self._failure("No essay or question provided.", notes="Empty query.")
@@ -81,6 +83,22 @@ class APReaderAgent(BaseAgent):
         self.log(f"AP Reader query ({subject} {essay_type}): {query[:80]}")
 
         try:
+            # Always search College Board for current rubrics when grading AP work
+            rubric_ref = ""
+            search_subject = subject if subject != "AP" else (
+                next((s for s in ["Human Geography", "English Language", "Biology",
+                                  "Calculus", "Statistics", "World History", "US History"]
+                      if s.lower() in query.lower() or s.lower() in context.lower()), "")
+            )
+            if search_subject:
+                results = search(
+                    f"AP {search_subject} {essay_type} scoring rubric guidelines site:apcentral.collegeboard.org"
+                )
+                if not results:
+                    results = search(f"AP {search_subject} {essay_type} College Board scoring guide 2025 2026")
+                if results:
+                    rubric_ref = f"\n\nOfficial College Board Scoring Resources:\n{format_results(results)}"
+
             user_message = query
             if context:
                 user_message = (
@@ -89,6 +107,7 @@ class APReaderAgent(BaseAgent):
                     f"Prompt: {context}\n\n"
                     f"Student's Essay/Response:\n{query}"
                 )
+            user_message += rubric_ref
 
             response = call_claude(
                 system_prompt=SYSTEM_PROMPT,

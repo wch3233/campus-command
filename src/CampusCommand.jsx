@@ -32,6 +32,11 @@ const AGENTS = [
 
 const AGENT_MAP = Object.fromEntries(AGENTS.map(a => [a.id, a]))
 
+// ── API base URL — relative when served from Flask, explicit for Electron ─────
+// When accessed via browser over the network (http://192.168.x.x:5001), use relative paths.
+// When running inside Electron (file:// protocol), fall back to localhost.
+const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:5001' : ''
+
 // ── Plotly component ──────────────────────────────────────────────────────────
 function PlotlyChart({ spec }) {
   const ref = useRef(null)
@@ -368,6 +373,22 @@ function LoadingDots() {
   )
 }
 
+// ── RHS Assets ────────────────────────────────────────────────────────────────
+const RHS_LOGO = 'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_2/v1718283782/rockwallisdcom/qgnbehenegqggdyoqnmg/RockingRtransparent.png'
+
+const RHS_PHOTOS = [
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1773081600/rockwallisdcom/gsslpbiiqjjtz6vnk1nx/rhsbanner1.png',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1773084668/rockwallisdcom/zvr0g8oiznbcoqh4btud/rhsbanner2_1.png',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1773078485/rockwallisdcom/hum3mdfteygk1t7ztlcw/WebsiteGalleryCoverPhoto13.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1772721249/rockwallisdcom/i7wzhcky4wkw6htbg0ho/WebsiteGalleryCoverPhoto12.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1772637156/rockwallisdcom/fv80nm60brluhy8oao7u/WebsiteGalleryCoverPhoto11.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1772553616/rockwallisdcom/q968upqwppptytub1bk7/WebsiteGalleryCoverPhoto10_1.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1771865633/rockwallisdcom/jhvxwtd04ghpbr1iskcb/WebsiteGalleryCoverPhoto9.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1771863130/rockwallisdcom/wugjztwguiuc7mofakhm/WebsiteGalleryCoverPhoto7.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1771865516/rockwallisdcom/f06wek4dgkaowscdfiys/RHSteam.jpg',
+  'https://resources.finalsite.net/images/f_auto,q_auto,t_image_size_3/v1772472245/rockwallisdcom/i36pa6cdbqcocs0myftd/rhsbanner.png',
+]
+
 // ── Example prompts ───────────────────────────────────────────────────────────
 const EXAMPLE_PROMPTS = [
   'Explain the quadratic formula with an example',
@@ -386,14 +407,44 @@ export default function CampusCommand() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [selectedAgent, setSelectedAgent] = useState('')
-  const [error, setError] = useState('')
+  const [droppedImage, setDroppedImage] = useState(null) // {data, type, preview}
+  const [dragOver, setDragOver] = useState(false)
+  const [photoIndex, setPhotoIndex] = useState(0)
+  const [showProfile, setShowProfile] = useState(false)
+  const [memoryFacts, setMemoryFacts] = useState({})
+  const [profileDraft, setProfileDraft] = useState({})
+  const [networkUrl, setNetworkUrl] = useState(null)
+  const [urlCopied, setUrlCopied] = useState(false)
   const chatEndRef = useRef(null)
   const textareaRef = useRef(null)
+  const fileInputRef = useRef(null)
 
   // Auto-scroll
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // Rotate welcome photo every 4 seconds
+  useEffect(() => {
+    const t = setInterval(() => setPhotoIndex(i => (i + 1) % RHS_PHOTOS.length), 4000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Load student memory on mount
+  useEffect(() => {
+    fetch(`${API_BASE}/api/memory`)
+      .then(r => r.json())
+      .then(facts => { setMemoryFacts(facts); setProfileDraft(facts) })
+      .catch(() => {})
+  }, [])
+
+  // Load network URL for sharing
+  useEffect(() => {
+    fetch(`${API_BASE}/api/network-url`)
+      .then(r => r.json())
+      .then(d => { if (d.url) setNetworkUrl(d.url) })
+      .catch(() => {})
+  }, [])
 
   // Auto-resize textarea
   const handleInputChange = (e) => {
@@ -403,19 +454,77 @@ export default function CampusCommand() {
     el.style.height = Math.min(el.scrollHeight, 120) + 'px'
   }
 
+  // ── Image helpers ────────────────────────────────────────────────────────────
+  const readImageFile = (file) => {
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const dataURL = e.target.result  // data:image/jpeg;base64,....
+      const [header, base64] = dataURL.split(',')
+      const mimeMatch = header.match(/data:([^;]+);/)
+      setDroppedImage({
+        data: base64,
+        type: mimeMatch ? mimeMatch[1] : 'image/jpeg',
+        preview: dataURL,
+        name: file.name,
+      })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    readImageFile(file)
+  }
+
+  const handleDragOver = (e) => { e.preventDefault(); setDragOver(true) }
+  const handleDragLeave = () => setDragOver(false)
+
+  // ── Memory helpers ───────────────────────────────────────────────────────────
+  const saveFact = async (key, value) => {
+    try {
+      await fetch(`${API_BASE}/api/memory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      setMemoryFacts(prev => {
+        const updated = { ...prev }
+        if (value) updated[key] = value
+        else delete updated[key]
+        return updated
+      })
+    } catch (e) { console.error('Memory save error:', e) }
+  }
+
+  const deleteFact = async (key) => {
+    try {
+      await fetch(`${API_BASE}/api/memory/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      })
+      setMemoryFacts(prev => { const u = { ...prev }; delete u[key]; return u })
+      setProfileDraft(prev => { const u = { ...prev }; delete u[key]; return u })
+    } catch (e) { console.error('Memory delete error:', e) }
+  }
+
   const sendMessage = useCallback(async (text) => {
     const trimmed = (text || input).trim()
-    if (!trimmed || loading) return
+    if ((!trimmed && !droppedImage) || loading) return
 
     const userMsg = {
       id: Date.now(),
       role: 'user',
-      content: trimmed,
+      content: trimmed || '📷 Image attached',
+      imagePreview: droppedImage?.preview || null,
       timestamp: Date.now(),
     }
     setMessages(prev => [...prev, userMsg])
     setInput('')
-    setError('')
+    setDroppedImage(null)
     setLoading(true)
 
     if (textareaRef.current) {
@@ -427,10 +536,17 @@ export default function CampusCommand() {
         ? `Route to ${selectedAgent} agent. Student specifically selected this agent.`
         : ''
 
-      const res = await fetch('http://localhost:5001/api/query', {
+      const body = {
+        query: trimmed,
+        context: contextStr,
+        history: '',
+        ...(droppedImage ? { image: { data: droppedImage.data, type: droppedImage.type } } : {}),
+      }
+
+      const res = await fetch(`${API_BASE}/api/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed, context: contextStr, history: '' }),
+        body: JSON.stringify(body),
       })
 
       if (!res.ok) {
@@ -464,7 +580,7 @@ export default function CampusCommand() {
     } finally {
       setLoading(false)
     }
-  }, [input, loading, selectedAgent])
+  }, [input, loading, selectedAgent, droppedImage])
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -738,7 +854,7 @@ export default function CampusCommand() {
     },
   }
 
-  const sendDisabled = loading || !input.trim()
+  const sendDisabled = loading || (!input.trim() && !droppedImage)
 
   return (
     <div style={S.app}>
@@ -748,7 +864,54 @@ export default function CampusCommand() {
           <span style={{ fontSize: 24 }}>🎓</span>
           <span style={S.headerTitle}>Campus Command</span>
         </div>
-        <span style={S.headerBadge}>Rockwall ISD · 9th Grade</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {networkUrl && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(networkUrl).then(() => {
+                  setUrlCopied(true)
+                  setTimeout(() => setUrlCopied(false), 2000)
+                })
+              }}
+              title="Click to copy — open this address in any browser on the same WiFi"
+              style={{
+                background: urlCopied ? '#1b5e2022' : '#4fc3f708',
+                border: `1px solid ${urlCopied ? '#4caf50' : '#1e3a5a'}`,
+                borderRadius: 8,
+                color: urlCopied ? '#4caf50' : '#4a6a8a',
+                cursor: 'pointer',
+                fontSize: 11,
+                fontFamily: 'monospace',
+                padding: '4px 10px',
+                letterSpacing: '0.02em',
+                transition: 'all 0.2s',
+                flexShrink: 0,
+              }}
+            >
+              {urlCopied ? '✓ Copied!' : '📱 ' + networkUrl}
+            </button>
+          )}
+          <button
+            onClick={() => { setProfileDraft({ ...memoryFacts }); setShowProfile(true) }}
+            style={{
+              background: Object.keys(memoryFacts).length > 0 ? '#4fc3f715' : 'none',
+              border: '1px solid #1e3a5a',
+              borderRadius: 8,
+              color: Object.keys(memoryFacts).length > 0 ? '#4fc3f7' : '#7a9ab8',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 600,
+              padding: '4px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+            title="My Profile & Classes"
+          >
+            👤 {Object.keys(memoryFacts).length > 0 ? (memoryFacts.student_name || 'My Profile') : 'Set Up Profile'}
+          </button>
+          <span style={S.headerBadge}>Rockwall ISD · 9th Grade</span>
+        </div>
       </div>
 
       {/* Body */}
@@ -795,14 +958,73 @@ export default function CampusCommand() {
         </div>
 
         {/* Chat area */}
-        <div style={S.chatArea}>
-          <div style={S.messages}>
+        <div
+          style={S.chatArea}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
+          {/* Drag overlay */}
+          {dragOver && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 10,
+              background: 'rgba(15,25,41,0.88)',
+              border: '2px dashed #4fc3f7',
+              borderRadius: 12,
+              display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              gap: 12, pointerEvents: 'none',
+            }}>
+              <span style={{ fontSize: 48 }}>📷</span>
+              <span style={{ color: '#4fc3f7', fontSize: 18, fontWeight: 700 }}>Drop image here</span>
+              <span style={{ color: '#7a9ab8', fontSize: 13 }}>JPG, PNG, or GIF</span>
+            </div>
+          )}
+
+          <div style={{ ...S.messages, position: 'relative' }}>
             {/* Welcome screen */}
             {messages.length === 0 && !loading && (
               <div style={S.welcomeWrap}>
-                <div style={S.welcomeIcon}>🎓</div>
-                <div style={S.welcomeTitle}>CAMPUS COMMAND</div>
-                <div style={S.welcomeSub}>Your AI School Team — Rockwall ISD</div>
+                {/* Rotating school photo */}
+                <div style={{
+                  width: '100%', maxWidth: 640, height: 200,
+                  borderRadius: 12, overflow: 'hidden',
+                  position: 'relative', marginBottom: 8,
+                  border: '1px solid #1e3a5a',
+                  flexShrink: 0,
+                }}>
+                  {RHS_PHOTOS.map((src, i) => (
+                    <img
+                      key={src}
+                      src={src}
+                      alt="Rockwall High School"
+                      style={{
+                        position: 'absolute', inset: 0,
+                        width: '100%', height: '100%',
+                        objectFit: 'cover',
+                        opacity: i === photoIndex ? 1 : 0,
+                        transition: 'opacity 1s ease',
+                      }}
+                    />
+                  ))}
+                  {/* Dark gradient overlay so text stays readable */}
+                  <div style={{
+                    position: 'absolute', inset: 0,
+                    background: 'linear-gradient(to bottom, transparent 40%, rgba(15,25,41,0.85) 100%)',
+                  }} />
+                  {/* Logo + title over photo */}
+                  <div style={{
+                    position: 'absolute', bottom: 12, left: 16,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <img src={RHS_LOGO} alt="RHS" style={{ height: 36, width: 'auto', filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.8))' }} />
+                    <div>
+                      <div style={{ fontSize: 18, fontWeight: 900, letterSpacing: '0.06em', color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>CAMPUS COMMAND</div>
+                      <div style={{ fontSize: 11, color: '#c8e8ff', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>Rockwall ISD · Rock Nine · Yellowjackets</div>
+                    </div>
+                  </div>
+                </div>
+
                 <div style={S.chipRow}>
                   {EXAMPLE_PROMPTS.map((p, i) => (
                     <div
@@ -833,7 +1055,20 @@ export default function CampusCommand() {
                 return (
                   <div key={msg.id} style={S.userBubbleWrap}>
                     <div>
-                      <div style={S.userBubble}>{msg.content}</div>
+                      {msg.imagePreview && (
+                        <img
+                          src={msg.imagePreview}
+                          alt="attached"
+                          style={{
+                            maxWidth: 260, maxHeight: 200, borderRadius: 10,
+                            display: 'block', marginBottom: 6,
+                            border: '1px solid #2a4a6a', marginLeft: 'auto',
+                          }}
+                        />
+                      )}
+                      {msg.content !== '📷 Image attached' && (
+                        <div style={S.userBubble}>{msg.content}</div>
+                      )}
                       <div style={S.userTime}>{formatTime(msg.timestamp)}</div>
                     </div>
                   </div>
@@ -889,14 +1124,60 @@ export default function CampusCommand() {
                 Sending directly to {AGENT_MAP[selectedAgent]?.emoji} {AGENT_MAP[selectedAgent]?.label} — click Auto Route in sidebar to remove
               </div>
             )}
+
+            {/* Image preview strip */}
+            {droppedImage && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <img
+                  src={droppedImage.preview}
+                  alt="preview"
+                  style={{
+                    height: 56, width: 'auto', maxWidth: 120,
+                    borderRadius: 8, border: '1px solid #2a4a6a', objectFit: 'cover',
+                  }}
+                />
+                <span style={{ fontSize: 12, color: '#7a9ab8', flex: 1 }}>{droppedImage.name}</span>
+                <button
+                  onClick={() => setDroppedImage(null)}
+                  style={{
+                    background: 'none', border: 'none', color: '#ff6b6b',
+                    cursor: 'pointer', fontSize: 16, padding: '0 4px',
+                  }}
+                  title="Remove image"
+                >✕</button>
+              </div>
+            )}
+
             <div style={S.inputRow}>
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={e => readImageFile(e.target.files[0])}
+              />
+              {/* Image upload button */}
+              <button
+                style={{
+                  background: 'none', border: 'none',
+                  color: droppedImage ? '#4fc3f7' : '#4a6a8a',
+                  cursor: 'pointer', fontSize: 18, padding: '0 4px',
+                  flexShrink: 0,
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach image (or drag & drop)"
+                disabled={loading}
+              >
+                📷
+              </button>
               <textarea
                 ref={textareaRef}
                 style={S.textarea}
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask anything — math, science, history, essays, or just talk..."
+                placeholder={droppedImage ? 'Add a question about this image… (or just press Enter)' : 'Ask anything — math, science, history, essays, or just talk…'}
                 rows={1}
                 disabled={loading}
               />
@@ -912,6 +1193,130 @@ export default function CampusCommand() {
           </div>
         </div>
       </div>
+
+      {/* ── My Profile Modal ─────────────────────────────────────────────────── */}
+      {showProfile && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setShowProfile(false)}
+        >
+          <div
+            style={{
+              background: '#0F1929',
+              border: '1px solid #1e3a5a',
+              borderRadius: 16,
+              width: 500, maxWidth: '92vw',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              padding: 28,
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: '#4fc3f7' }}>👤 My Profile</span>
+              <button onClick={() => setShowProfile(false)} style={{ background: 'none', border: 'none', color: '#7a9ab8', fontSize: 20, cursor: 'pointer' }}>✕</button>
+            </div>
+            <p style={{ color: '#7a9ab8', fontSize: 12, marginBottom: 20, lineHeight: 1.5 }}>
+              Everything saved here is remembered permanently across sessions — all agents will know your context automatically.
+            </p>
+
+            {/* Pre-defined fields */}
+            {[
+              { key: 'student_name',    label: 'Your Name',              placeholder: 'e.g. Alex',                                                       multi: false },
+              { key: 'current_classes', label: 'Current Classes',        placeholder: 'e.g. Algebra I, English I Honors, AP Human Geography, Biology',   multi: true  },
+              { key: 'ap_classes',      label: 'AP / Honors Classes',    placeholder: 'e.g. AP Human Geography, English I Honors',                       multi: false },
+              { key: 'learning_goals',  label: 'Learning Goals',         placeholder: 'e.g. Improve essay writing, understand quadratic equations',      multi: false },
+              { key: 'teachers',        label: 'Teacher Names',          placeholder: 'e.g. Ms. Smith (Math), Mr. Jones (English)',                      multi: false },
+            ].map(({ key, label, placeholder, multi }) => (
+              <div key={key} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#8ab0cc', marginBottom: 6 }}>{label}</div>
+                {multi ? (
+                  <textarea
+                    value={profileDraft[key] || ''}
+                    onChange={e => setProfileDraft(d => ({ ...d, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    rows={3}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      background: '#0a1220', border: '1px solid #1e3a5a',
+                      borderRadius: 8, color: '#e8f4fd', fontSize: 13,
+                      padding: '8px 12px', resize: 'vertical', fontFamily: 'inherit',
+                    }}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={profileDraft[key] || ''}
+                    onChange={e => setProfileDraft(d => ({ ...d, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      background: '#0a1220', border: '1px solid #1e3a5a',
+                      borderRadius: 8, color: '#e8f4fd', fontSize: 13,
+                      padding: '8px 12px', fontFamily: 'inherit',
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+
+            {/* Extra stored facts not in the predefined list */}
+            {(() => {
+              const predefined = ['student_name','current_classes','ap_classes','learning_goals','teachers']
+              const extras = Object.entries(memoryFacts).filter(([k]) => !predefined.includes(k))
+              if (extras.length === 0) return null
+              return (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#8ab0cc', marginBottom: 8 }}>Other Saved Facts</div>
+                  {extras.map(([k, v]) => (
+                    <div key={k} style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      background: '#0a1220', border: '1px solid #1e3a5a',
+                      borderRadius: 8, padding: '6px 12px', marginBottom: 6, fontSize: 12,
+                    }}>
+                      <span style={{ color: '#4fc3f7', fontWeight: 600 }}>{k}:</span>
+                      <span style={{ color: '#e8f4fd', flex: 1 }}>{v}</span>
+                      <button onClick={() => deleteFact(k)} style={{ background: 'none', border: 'none', color: '#ff6b6b', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+
+            {/* Save button */}
+            <button
+              onClick={async () => {
+                const predefined = ['student_name','current_classes','ap_classes','learning_goals','teachers']
+                for (const key of predefined) {
+                  const draftVal = (profileDraft[key] || '').trim()
+                  const storedVal = (memoryFacts[key] || '').trim()
+                  if (draftVal !== storedVal) await saveFact(key, draftVal)
+                }
+                setShowProfile(false)
+              }}
+              style={{
+                width: '100%',
+                background: '#1565c0',
+                border: 'none',
+                borderRadius: 10,
+                color: '#e8f4fd',
+                fontSize: 14,
+                fontWeight: 700,
+                padding: '11px 0',
+                cursor: 'pointer',
+                marginTop: 4,
+              }}
+            >
+              Save Profile
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

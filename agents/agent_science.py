@@ -71,7 +71,21 @@ class ScienceAgent(BaseAgent):
         try:
             extra = ""
             if do_search:
-                results = search(f"high school science {query}")
+                ap_hint = ""
+                if "AP Biology" in context:
+                    ap_hint = "AP Biology"
+                elif "AP Chemistry" in context:
+                    ap_hint = "AP Chemistry"
+                elif "AP Physics" in context:
+                    ap_hint = "AP Physics"
+                elif "AP Environmental" in context:
+                    ap_hint = "AP Environmental Science"
+                if ap_hint:
+                    results = search(f"{ap_hint} {query} College Board CED site:apcentral.collegeboard.org")
+                    if not results:
+                        results = search(f"{ap_hint} {query} College Board exam")
+                else:
+                    results = search(f"high school science {query} Texas TEKS")
                 if results:
                     extra = f"\n\nAdditional reference material:\n{format_results(results)}"
 

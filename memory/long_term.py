@@ -165,3 +165,39 @@ class LongTermMemory:
         for k, v in facts.items():
             lines.append(f"  • {k}: {v}")
         return "\n".join(lines)
+
+    # ── Conversation history ───────────────────────────────────────────────────
+
+    def add_conversation_turn(self, role: str, content: str, agent: str = "") -> None:
+        """
+        Save a conversation turn (capped at 40 turns total).
+
+        Args:
+            role:    "user" or "assistant".
+            content: Message text (truncated to 1000 chars for storage).
+            agent:   Which agent produced this (for assistant turns).
+        """
+        conv = self._data.setdefault("conversation", [])
+        conv.append({
+            "role": role,
+            "content": str(content)[:1000],
+            "agent": agent,
+            "ts": datetime.datetime.now().isoformat(),
+        })
+        self._data["conversation"] = conv[-40:]
+        self._save()
+
+    def get_conversation_history(self, last_n: int = 10) -> list:
+        """Return the last N conversation turns."""
+        return self._data.get("conversation", [])[-last_n:]
+
+    def format_history_for_prompt(self, last_n: int = 6) -> str:
+        """Return recent history as a formatted string for prompt injection."""
+        turns = self.get_conversation_history(last_n)
+        if not turns:
+            return ""
+        lines = ["Recent conversation history (for context):"]
+        for t in turns:
+            label = "Student" if t["role"] == "user" else f"Assistant"
+            lines.append(f"  {label}: {str(t['content'])[:400]}")
+        return "\n".join(lines)
